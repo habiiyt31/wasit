@@ -1,0 +1,35 @@
+{
+  "networks": {
+    "studionet": {
+      "rpcUrl": "https://studio.genlayer.com/api",
+      "chainId": 61999,
+      "currency": "GEN",
+      "explorer": "https://explorer-studio.genlayer.com"
+    },
+    "localnet": {
+      "rpcUrl": "http://localhost:4000/api",
+      "chainId": 61127,
+      "currency": "GEN",
+      "explorer": "http://localhost:8080"
+    },
+    "testnetAsimov": {
+      "genlayerRpcUrl": "https://rpc-asimov.genlayer.com",
+      "chainRpcUrl": "https://rpc.testnet-chain.genlayer.com",
+      "chainId": 4221,
+      "currency": "GEN",
+      "explorer": "https://explorer-asimov.genlayer.com",
+      "chainExplorer": "https://explorer.testnet-chain.genlayer.com",
+      "faucet": "https://testnet-faucet.genlayer.foundation"
+    },
+    "testnetBradbury": {
+      "genlayerRpcUrl": "https://rpc-bradbury.genlayer.com",
+      "chainRpcUrl": "https://rpc.testnet-chain.genlayer.com",
+      "chainId": 4221,
+      "currency": "GEN",
+      "explorer": "https://explorer-bradbury.genlayer.com",
+      "chainExplorer": "https://explorer.testnet-chain.genlayer.com",
+      "faucet": "https://testnet-faucet.genlayer.foundation"
+    }
+  },
+  "defaultNetwork": "studionet"
+}

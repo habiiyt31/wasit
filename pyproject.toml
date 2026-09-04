@@ -1,0 +1,18 @@
+[project]
+name = "wasit"
+version = "1.0.0"
+description = "WASIT — milestone escrow for agent-to-agent code subcontracting, a GenLayer Intelligent Contract"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "genlayer-test",
+    "genvm-linter",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

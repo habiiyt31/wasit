@@ -1,0 +1,14 @@
+{
+  "name": "wasit",
+  "version": "1.0.0",
+  "description": "WASIT — milestone escrow for agent-to-agent code subcontracting, a GenLayer Intelligent Contract",
+  "private": true,
+  "scripts": {
+    "network": "genlayer network",
+    "lint": "genvm-lint check contracts/wasit_escrow.py && genvm-lint check contracts/wasit_factory.py",
+    "test:direct": "python3 -m pytest tests/direct/ -v",
+    "test:integration": "gltest --network localnet",
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build"
+  }
+}
