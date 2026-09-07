@@ -1,7 +1,8 @@
 # { "Depends": "py-genlayer:1jb45aa8ynh2a9c9xn3b7qqh8sm5q93hwfp7jqmwsfhh8jpz09h6" }
 
 from genlayer import *
-import typing
+
+SENIOR_BOND_MULTIPLIER = u256(5)
 
 
 WASIT_ESCROW_SOURCE = '''
@@ -102,7 +103,6 @@ WASIT_ESCROW_SOURCE = '''
 from genlayer import *
 from dataclasses import dataclass
 import datetime
-import typing
 
 
 _EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
@@ -151,7 +151,11 @@ class MilestoneReclaimed(gl.Event):
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MAX_MILESTONES = 20
 APPEAL_BOND_BPS = u256(500)  # 5% of the milestone amount, paid to appeal
-SENIOR_BOND_MULTIPLIER = u256(5)  # a senior arbiter must have staked 5x the factory's min bond
+# NOTE: the senior-arbiter bond multiplier (5x) is enforced by
+# WasitFactory.is_senior_arbiter(), not here -- this escrow only calls
+# that check via gl.get_contract_at(self.factory).view().is_senior_arbiter(...).
+# See wasit_factory.py's SENIOR_BOND_MULTIPLIER for the one place that
+# number actually lives.
 
 
 @allow_storage
@@ -501,8 +505,9 @@ class WasitEscrow(gl.Contract):
     def appeal_ruling(self, index: u256, senior_arbiter_addr: str) -> None:
         """
         Either party can escalate a first-instance ruling to a senior
-        arbiter (one staked at SENIOR_BOND_MULTIPLIER x the factory's
-        minimum) within the appeal window, by posting a bond of
+        arbiter (staked at the multiplier WasitFactory enforces via
+        is_senior_arbiter -- see that function, not a local constant
+        here) within the appeal window, by posting a bond of
         APPEAL_BOND_BPS of the milestone amount. The bond goes back to
         whoever appealed if the senior arbiter reverses the ruling, or
         to fee_recipient if it's upheld -- an appeal that just wastes
@@ -722,7 +727,7 @@ class WasitFactory(gl.Contract):
         eligibility check, since ruling on an appeal is meant to carry
         more weight than a first-instance ruling."""
         stake = self.arbiter_stake.get(Address(arbiter_addr), u256(0))
-        return stake >= self.min_arbiter_bond * u256(5)
+        return stake >= self.min_arbiter_bond * SENIOR_BOND_MULTIPLIER
 
     @gl.public.view
     def get_arbiter_count(self) -> u256:

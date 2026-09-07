@@ -75,6 +75,17 @@ GenLayer's own [Internet Court](https://internetcourt.org) (launched July 10 202
 | `SENIOR_BOND_MULTIPLIER` | 5x | senior arbiter's word is final, bar is higher |
 | `MAX_MILESTONES` | 20 | keeps summation loops bounded |
 
+## Is this actually usable by AI agents, or just a web form for humans?
+
+Both — but they're genuinely separate paths. `frontend/` is the
+human-at-a-browser path (MetaMask). `agents/` is the answer to
+whether an autonomous agent can do this with no human and no browser
+involved at all: two standalone scripts, each with its own private
+key, signing directly via `createAccount()` (confirmed a real local
+signer against genlayer-js's own types, not a browser relay) and
+completing a full escrow deal against each other. See `agents/README.md`
+for what this does and doesn't prove.
+
 ## Project structure
 
 ```
@@ -85,6 +96,9 @@ wasit/
   tests/
     direct/                 # pure Python, no network
     integration/              # full deploy + consensus
+  agents/
+    buyer-agent.ts / seller-agent.ts  # standalone AI-agent processes, no browser
+    shared.ts                          # createAccount()-based client setup
   frontend/
     app/                        # page.tsx, create/, escrow/[address]/, arbiter/
     components/                   # Logo, ConnectButton, StatusBadge, MilestoneCard
@@ -109,16 +123,21 @@ Studionet resets periodically (a working address can come back "not found" later
 
 ## Setup — deploying and testing both contracts
 
-**Only the Factory needs a manual deploy, and only once.** Every real
-user after that never touches a CLI or fills in a raw constructor —
-they connect a wallet on the web app and submit a form; the Factory's
-`create_escrow()` calls `gl.deploy_contract()` for them automatically,
-with whatever project/arbiter/milestone values THAT user chose. The
-standalone `genlayer deploy --contract contracts/wasit_escrow.py` step
-below is a one-time TEST of the escrow's own logic in isolation —
-never how a real deal gets created. If you skip straight to deploying
-the factory and using the web app, that's the correct, universal path.
+**Only two manual deploys, total, ever.** After that, every real user
+just connects a wallet on the web app and submits a form — the
+Factory's `create_escrow()` calls `gl.deploy_contract()` for them
+automatically. Nobody after you ever touches a CLI or fills in a raw
+constructor.
 
+**Deploy the Factory FIRST, not the Escrow.** This matters for a
+concrete reason, not just tidiness: `milestone_arbiter_rule()` and
+`senior_arbiter_rule()` both call back into the factory
+(`record_arbiter_ruling`). If you deploy the escrow standalone with a
+placeholder `factory_addr`, that callback breaks the moment your test
+reaches an arbiter ruling — which is most of what's worth testing.
+Deploying the Factory first means every later step uses its real
+address, so the full flow (including arbiter rulings and appeals)
+actually works end to end.
 
 ```bash
 npm install -g genlayer
@@ -127,7 +146,24 @@ npm run network   # choose studionet, fund via the faucet
 npm run lint       # lints BOTH contracts
 ```
 
-**Deploy `wasit_escrow.py` standalone first** — isolates "does the escrow logic work" from "does the factory deploy it correctly":
+**Step 1 — deploy `wasit_factory.py`.** One constructor argument:
+
+| Arg | Example |
+|---|---|
+| `min_arbiter_bond` | `1000000000000000000` (1 GEN) |
+
+```bash
+genlayer deploy --contract contracts/wasit_factory.py
+```
+
+Note the printed address — call it `FACTORY` below. You'll also need
+it in `frontend/.env.local` later (`NEXT_PUBLIC_FACTORY_ADDRESS`,
+copied exactly as printed — see the address-casing section).
+
+**Step 2 — deploy `wasit_escrow.py` standalone.** This is a one-time
+TEST of the escrow's own logic in isolation from the factory's deploy
+mechanism — never how a real deal gets created (that's step 4, below).
+Use the real `FACTORY` address from Step 1, not a placeholder:
 
 ```bash
 genlayer deploy --contract contracts/wasit_escrow.py
@@ -138,27 +174,29 @@ Fill in real constructor values (an empty/zero deploy correctly fails the contra
 | Arg | Example |
 |---|---|
 | `buyer_addr` | your wallet address |
-| `project_title` | "Rate limiter middleware" (>=10 chars) |
-| `project_description` | "Implement a token bucket rate limiter for the API gateway, handling burst traffic gracefully." (>=40 chars) |
+| `project_title` | `Rate limiter middleware` |
+| `project_description` | `Implement a token bucket rate limiter for the public API gateway, handling burst traffic gracefully.` |
 | `arbiter_addr` | a second address, can be your own for this first test |
-| `factory_addr` | `0x0000000000000000000000000000000000000000` for this standalone test |
+| `factory_addr` | `FACTORY` from Step 1 — the real address, not `0x000...000` |
 | `token_address` | `0x0000000000000000000000000000000000000000` (native GEN) |
-| `fee_bps` | 250 |
+| `fee_bps` | `250` |
 | `fee_recipient_addr` | your wallet address |
-| `max_revisions` | 3 |
-| `max_claim_attempts` | 3 |
-| `abandonment_timeout_days` | 14 |
-| `appeal_window_days` | 3 |
+| `max_revisions` | `3` |
+| `max_claim_attempts` | `3` |
+| `abandonment_timeout_days` | `14` |
+| `appeal_window_days` | `3` |
 
-**Walk the full state machine manually**, in order: add 2 milestones + lock + fund -> submit a passing deliverable, confirm release -> submit a failing one, confirm `disputed`, confirm resubmit increments `revision_count` -> exhaust revisions, call `milestone_arbiter_rule`, confirm `pending_finalization` and funds NOT moved -> try `appeal_ruling` with an unstaked senior address, confirm rejection -> `finalize_ruling` after the window passes, confirm payout.
+**Step 3 — walk the full state machine manually**, in order: add 2 milestones + lock + fund -> submit a passing deliverable, confirm release -> submit a failing one, confirm `disputed`, confirm resubmit increments `revision_count` -> exhaust revisions, call `milestone_arbiter_rule`, confirm `pending_finalization` and funds NOT moved -> try `appeal_ruling` with an unstaked senior address, confirm rejection -> `finalize_ruling` after the window passes, confirm payout.
 
-**Deploy `wasit_factory.py`** (constructor arg: `min_arbiter_bond`), copy the printed address into `frontend/.env.local` as `NEXT_PUBLIC_FACTORY_ADDRESS` exactly as printed (see address-casing section), then:
+**Step 4 — point the frontend at the Factory:**
 
 ```bash
-cd frontend && cp .env.example .env.local && npm install && npm run dev
+cd frontend && cp .env.example .env.local
+# paste FACTORY into NEXT_PUBLIC_FACTORY_ADDRESS, exactly as printed
+npm install && npm run dev
 ```
 
-Then re-walk the same checklist through the factory-deployed instance via `/create` — this catches anything specific to `gl.deploy_contract()` a standalone deploy can't.
+Then re-walk the same checklist from Step 3, but through the factory's `/create` page this time — this catches anything specific to `gl.deploy_contract()` that a standalone deploy can't.
 
 ## A worked failure (what a rejected deploy looks like)
 

@@ -1,0 +1,17 @@
+{
+  "name": "wasit-agents",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "buyer": "tsx buyer-agent.ts",
+    "seller": "tsx seller-agent.ts"
+  },
+  "dependencies": {
+    "genlayer-js": "^1.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.3"
+  }
+}

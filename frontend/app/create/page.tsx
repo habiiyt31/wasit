@@ -19,6 +19,9 @@ export default function CreateEscrowPage() {
   const [projectTitle, setProjectTitle] = useState("");
   const [projectDescription, setProjectDescription] = useState("");
   const [arbiterAddress, setArbiterAddress] = useState("");
+  const [treasuryAddress, setTreasuryAddress] = useState(
+    process.env.NEXT_PUBLIC_DEFAULT_TREASURY_ADDRESS ?? ""
+  );
   const [feeBps, setFeeBps] = useState("250");
   const [maxRevisions, setMaxRevisions] = useState("3");
   const [maxClaimAttempts, setMaxClaimAttempts] = useState("3");
@@ -75,7 +78,7 @@ export default function CreateEscrowPage() {
         arbiterAddress: arbiterAddress as `0x${string}`,
         tokenAddress: ZERO_ADDRESS,
         feeBps: BigInt(feeBps),
-        feeRecipientAddress: arbiterAddress as `0x${string}`, // adjust to your own treasury address
+        feeRecipientAddress: treasuryAddress as `0x${string}`,
         maxRevisions: BigInt(maxRevisions),
         maxClaimAttempts: BigInt(maxClaimAttempts),
         abandonmentTimeoutDays: BigInt(abandonmentDays),
@@ -216,6 +219,12 @@ export default function CreateEscrowPage() {
         <details className="rounded-lg border border-wasit-line p-3 text-sm">
           <summary className="cursor-pointer font-semibold text-wasit-ink">Advanced</summary>
           <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="mb-1 block text-xs text-wasit-muted">
+                Protocol fee treasury address (receives the fee_bps cut — NOT the arbiter)
+              </label>
+              <input value={treasuryAddress} onChange={(e) => setTreasuryAddress(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm font-mono" placeholder="0x..." />
+            </div>
             <div>
               <label className="mb-1 block text-xs text-wasit-muted">Protocol fee (bps, max 1000)</label>
               <input value={feeBps} onChange={(e) => setFeeBps(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm" />
@@ -243,7 +252,7 @@ export default function CreateEscrowPage() {
 
         <button
           onClick={handleSubmit}
-          disabled={step !== "form" || !projectTitle || !arbiterAddress}
+          disabled={step !== "form" || !projectTitle || !arbiterAddress || !treasuryAddress}
           className="w-full rounded-full bg-wasit-ink py-3 text-sm font-bold text-wasit-bg disabled:opacity-40"
         >
           {step === "form" && "Deploy escrow"}

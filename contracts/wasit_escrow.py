@@ -3,8 +3,6 @@
 from genlayer import *
 from dataclasses import dataclass
 import datetime
-import typing
-
 
 _EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 _MESSAGE_DATETIME_FORMAT = "%Y-%m-%dT%H:%M:%S.%fZ"
@@ -52,7 +50,11 @@ class MilestoneReclaimed(gl.Event):
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 MAX_MILESTONES = 20
 APPEAL_BOND_BPS = u256(500)  # 5% of the milestone amount, paid to appeal
-SENIOR_BOND_MULTIPLIER = u256(5)  # a senior arbiter must have staked 5x the factory's min bond
+# NOTE: the senior-arbiter bond multiplier (5x) is enforced by
+# WasitFactory.is_senior_arbiter(), not here -- this escrow only calls
+# that check via gl.get_contract_at(self.factory).view().is_senior_arbiter(...).
+# See wasit_factory.py's SENIOR_BOND_MULTIPLIER for the one place that
+# number actually lives.
 
 
 @allow_storage
@@ -393,8 +395,9 @@ class WasitEscrow(gl.Contract):
     def appeal_ruling(self, index: u256, senior_arbiter_addr: str) -> None:
         """
         Either party can escalate a first-instance ruling to a senior
-        arbiter (one staked at SENIOR_BOND_MULTIPLIER x the factory's
-        minimum) within the appeal window, by posting a bond of
+        arbiter (staked at the multiplier WasitFactory enforces via
+        is_senior_arbiter -- see that function, not a local constant
+        here) within the appeal window, by posting a bond of
         APPEAL_BOND_BPS of the milestone amount. The bond goes back to
         whoever appealed if the senior arbiter reverses the ruling, or
         to fee_recipient if it's upheld -- an appeal that just wastes
