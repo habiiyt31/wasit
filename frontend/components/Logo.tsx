@@ -1,24 +1,19 @@
-export function Logo({ size = 40 }: { size?: number }) {
-  const scale = size / 90;
+export function Logo({ size = 38 }: { size?: number }) {
   return (
-    <svg width={size} height={size * 0.8} viewBox="0 0 90 70" xmlns="http://www.w3.org/2000/svg">
-      <g transform={`translate(48,38) scale(${scale})`}>
-        <rect x="18" y="-72" width="27" height="39" rx="6" fill="#E11D2E" transform="rotate(-11 31.5 -52.5)" />
-        <rect x="28" y="-66" width="27" height="39" rx="6" fill="#FFC700" transform="rotate(-3 41.5 -46.5)" />
-        <polygon points="-42,-5 -10,-17 38,-17 38,17 -10,17 -42,5" fill="#17181C" />
-        <circle cx="-36" cy="-2" r="7" fill="none" stroke="#17181C" strokeWidth="4" />
-        <rect x="4" y="-14" width="4" height="9" rx="2" fill="#FAF9F6" />
-        <rect x="14" y="-14" width="4" height="9" rx="2" fill="#FAF9F6" />
-        <rect x="24" y="-14" width="4" height="9" rx="2" fill="#FAF9F6" />
-      </g>
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="13" fill="#10312A" />
+      <rect x="21" y="14" width="15" height="22" rx="3" fill="#D7263D" transform="rotate(-12 28 25)" />
+      <rect x="29" y="17" width="15" height="22" rx="3" fill="#F2C230" transform="rotate(-4 36 28)" />
+      <path d="M13 44 L27 39 L48 39 L48 52 L27 52 Z" fill="#F7F8F5" />
+      <circle cx="16" cy="46" r="4" fill="none" stroke="#F7F8F5" strokeWidth="2.5" />
     </svg>
   );
 }
 
 export function Wordmark({ className = "" }: { className?: string }) {
   return (
-    <span className={`font-display font-bold tracking-wide text-wasit-ink ${className}`}>
-      WASIT
+    <span className={`font-display font-extrabold tracking-[0.01em] ${className}`}>
+      Wasit
     </span>
   );
 }

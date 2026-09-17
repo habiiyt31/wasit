@@ -1,272 +1,323 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Logo, Wordmark } from "@/components/Logo";
-import { ConnectButton } from "@/components/ConnectButton";
+import { SiteHeader } from "@/components/SiteHeader";
 import { useWallet } from "@/lib/useWallet";
-import { createEscrow, extractDeployedAddress, listArbiters } from "@/lib/wasitFactory";
-import { addMilestone, lockMilestones } from "@/lib/wasitEscrow";
-import { ZERO_ADDRESS } from "@/lib/genlayer";
+import { genToWei, weiToGen } from "@/lib/units";
+import {
+  createEscrow,
+  addMilestone,
+  lockMilestones,
+  listArbiters,
+  getEscrowCount,
+  type ArbiterInfo,
+} from "@/lib/wasit";
 
-type MilestoneDraft = { description: string; amount: string };
-type ArbiterOption = { address: `0x${string}`; stake: bigint; rulings: bigint };
+type Row = { description: string; amount: string };
 
-export default function CreateEscrowPage() {
+export default function CreatePage() {
   const router = useRouter();
-  const { address, connect } = useWallet();
+  const { address } = useWallet();
 
-  const [projectTitle, setProjectTitle] = useState("");
-  const [projectDescription, setProjectDescription] = useState("");
-  const [arbiterAddress, setArbiterAddress] = useState("");
-  const [treasuryAddress, setTreasuryAddress] = useState(
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [arbiter, setArbiter] = useState("");
+  const [rows, setRows] = useState<Row[]>([{ description: "", amount: "" }]);
+
+  const [treasury, setTreasury] = useState(
     process.env.NEXT_PUBLIC_DEFAULT_TREASURY_ADDRESS ?? ""
   );
   const [feeBps, setFeeBps] = useState("250");
-  const [maxRevisions, setMaxRevisions] = useState("3");
+  const [maxRevisions, setMaxRevisions] = useState("2");
   const [maxClaimAttempts, setMaxClaimAttempts] = useState("3");
-  const [abandonmentDays, setAbandonmentDays] = useState("14");
-  const [appealWindowDays, setAppealWindowDays] = useState("3");
-  const [milestones, setMilestones] = useState<MilestoneDraft[]>([
-    { description: "", amount: "" },
-  ]);
+  const [abandonmentDays, setAbandonmentDays] = useState("30");
+  const [appealDays, setAppealDays] = useState("3");
 
-  const [arbiters, setArbiters] = useState<ArbiterOption[]>([]);
-  const [step, setStep] = useState<"form" | "deploying" | "locking" | "done">("form");
+  const [arbiters, setArbiters] = useState<ArbiterInfo[]>([]);
+  const [step, setStep] = useState<"form" | "creating" | "milestones" | "locking">("form");
   const [error, setError] = useState<string | null>(null);
-  const [newEscrowAddress, setNewEscrowAddress] = useState<string | null>(null);
+
+  // Ref-based guard: prevents double-submission even if the button is
+  // somehow clicked twice before React can re-render the disabled state.
+  const submitting = useRef(false);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const list = await listArbiters();
-        setArbiters(list.filter((a) => a.eligible));
-      } catch {
-        // Factory not deployed yet, or unreachable -- form still works,
-        // the picker just stays empty and arbiterAddress can be typed
-        // in manually.
-      }
-    })();
-  }, []);
+    listArbiters(address ?? undefined)
+      .then((list) => setArbiters(list.filter((a) => a.eligible)))
+      .catch(() => {});
+  }, [address]);
 
-  function updateMilestone(i: number, field: keyof MilestoneDraft, value: string) {
-    setMilestones((prev) => prev.map((m, idx) => (idx === i ? { ...m, [field]: value } : m)));
-  }
+  useEffect(() => {
+    if (address && !treasury) setTreasury(address);
+  }, [address, treasury]);
 
-  function addMilestoneRow() {
-    setMilestones((prev) => [...prev, { description: "", amount: "" }]);
-  }
+  const setRow = (i: number, key: keyof Row, value: string) =>
+    setRows((prev) => prev.map((r, n) => (n === i ? { ...r, [key]: value } : r)));
 
-  function removeMilestoneRow(i: number) {
-    setMilestones((prev) => prev.filter((_, idx) => idx !== i));
-  }
+  const filled = rows.filter((r) => r.description.trim() && r.amount.trim());
+  const ready =
+    !!address &&
+    title.trim().length >= 10 &&
+    description.trim().length >= 40 &&
+    !!arbiter.trim() &&
+    !!treasury.trim() &&
+    filled.length > 0;
 
-  async function handleSubmit() {
+  async function handleCreate() {
+    if (!address) return;
+    // Hard guard: if a submission is already in flight (e.g. user double-
+    // clicked or React batched two synthetic events), bail immediately so
+    // we never create two escrows for the same form fill.
+    if (submitting.current) return;
+    submitting.current = true;
+
     setError(null);
     try {
-      let wallet = address;
-      if (!wallet) {
-        await connect();
-        wallet = address;
-        if (!wallet) throw new Error("Connect your wallet first.");
-      }
+      // Snapshot the current escrow count BEFORE we create, so the new
+      // escrow's id is always (countBefore) regardless of any other
+      // concurrent escrow creations happening in the same block.
+      const countBefore = await getEscrowCount();
 
-      setStep("deploying");
-      const { receipt } = await createEscrow(wallet, {
-        projectTitle,
-        projectDescription,
-        arbiterAddress: arbiterAddress as `0x${string}`,
-        tokenAddress: ZERO_ADDRESS,
-        feeBps: BigInt(feeBps),
-        feeRecipientAddress: treasuryAddress as `0x${string}`,
-        maxRevisions: BigInt(maxRevisions),
-        maxClaimAttempts: BigInt(maxClaimAttempts),
-        abandonmentTimeoutDays: BigInt(abandonmentDays),
-        appealWindowDays: BigInt(appealWindowDays),
+      setStep("creating");
+      await createEscrow(address, {
+        projectTitle: title.trim(),
+        projectDescription: description.trim(),
+        arbiterAddress: arbiter.trim(),
+        feeBps: BigInt(feeBps || "0"),
+        feeRecipientAddress: treasury.trim(),
+        maxRevisions: BigInt(maxRevisions || "0"),
+        maxClaimAttempts: BigInt(maxClaimAttempts || "3"),
+        abandonmentTimeoutDays: BigInt(abandonmentDays || "30"),
+        appealWindowDays: BigInt(appealDays || "3"),
       });
 
-      const deployedAddress = extractDeployedAddress(receipt);
-      if (!deployedAddress) {
-        console.warn("Full receipt for manual inspection:", receipt);
-        throw new Error(
-          "Could not find the new escrow's address in the receipt — check the console and fix extractDeployedAddress() in lib/wasitFactory.ts"
+      const escrowId = countBefore; // new escrow's id = count before it was created
+
+      setStep("milestones");
+      for (const row of filled) {
+        await addMilestone(
+          address,
+          escrowId,
+          row.description.trim(),
+          genToWei(row.amount)
         );
       }
 
-      setNewEscrowAddress(deployedAddress);
-
       setStep("locking");
-      for (const m of milestones) {
-        if (!m.description || !m.amount) continue;
-        await addMilestone(deployedAddress, wallet, m.description, BigInt(m.amount));
-      }
-      await lockMilestones(deployedAddress, wallet);
+      await lockMilestones(address, escrowId);
 
-      setStep("done");
-      router.push(`/escrow/${deployedAddress}`);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+      router.push(`/escrow/${escrowId.toString()}`);
+    } catch (err: any) {
+      setError(err?.message ?? String(err));
       setStep("form");
+      // Release the guard only on error so the user can retry;
+      // on success we navigate away and this component unmounts.
+      submitting.current = false;
     }
   }
 
+  const busy = step !== "form";
+  const busyLabel =
+    step === "creating"
+      ? "Creating the escrow…"
+      : step === "milestones"
+      ? "Adding milestones…"
+      : step === "locking"
+      ? "Locking milestones…"
+      : "Create escrow";
+
+  let totalPreview = "";
+  try {
+    totalPreview = weiToGen(
+      filled.reduce((sum, r) => sum + genToWei(r.amount), 0n)
+    );
+  } catch {
+    totalPreview = "";
+  }
+
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
-      <header className="mb-10 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Logo size={32} />
-          <Wordmark className="text-lg" />
-        </div>
-        <ConnectButton />
-      </header>
+    <>
+      <SiteHeader back />
+      <main className="mx-auto max-w-[680px] px-f3 py-f5">
+        <h1 className="font-display text-m font-extrabold">Create an escrow</h1>
+        <p className="mt-f2 text-muted">
+          You are the buyer. Pick an arbiter who has already posted a bond, describe each
+          milestone, then fund it on the next screen.
+        </p>
 
-      <h1 className="font-display text-2xl font-bold text-wasit-ink">Create an escrow</h1>
-      <p className="mt-1 mb-8 text-sm text-wasit-muted">
-        You&apos;re the buyer. Set the spec, pick an arbiter, add milestones, then fund.
-      </p>
-
-      <div className="space-y-6">
-        <div>
-          <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-wasit-muted">
-            Project title
-          </label>
-          <input
-            value={projectTitle}
-            onChange={(e) => setProjectTitle(e.target.value)}
-            className="w-full rounded-lg border border-wasit-line p-3 text-sm"
-            placeholder="e.g. Rate-limiter middleware for the API gateway"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-wasit-muted">
-            Project context
-          </label>
-          <textarea
-            value={projectDescription}
-            onChange={(e) => setProjectDescription(e.target.value)}
-            className="w-full rounded-lg border border-wasit-line p-3 text-sm"
-            rows={3}
-            placeholder="Context the validator judge should know about the whole project, beyond a single milestone's spec."
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-wasit-muted">
-            Arbiter
-          </label>
-          {arbiters.length > 0 ? (
-            <select
-              value={arbiterAddress}
-              onChange={(e) => setArbiterAddress(e.target.value)}
-              className="w-full rounded-lg border border-wasit-line p-3 text-sm font-mono"
-            >
-              <option value="">Select a staked arbiter…</option>
-              {arbiters.map((a) => (
-                <option key={a.address} value={a.address}>
-                  {a.address.slice(0, 10)}…{a.address.slice(-4)} · {a.rulings.toString()} rulings
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              value={arbiterAddress}
-              onChange={(e) => setArbiterAddress(e.target.value)}
-              className="w-full rounded-lg border border-wasit-line p-3 text-sm font-mono"
-              placeholder="0x... (no staked arbiters found — paste an address)"
-            />
-          )}
-        </div>
-
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <label className="text-xs font-bold uppercase tracking-wide text-wasit-muted">
-              Milestones
-            </label>
-            <button onClick={addMilestoneRow} className="text-xs font-bold text-wasit-amber">
-              + Add milestone
-            </button>
-          </div>
-          <div className="space-y-3">
-            {milestones.map((m, i) => (
-              <div key={i} className="flex gap-2">
-                <input
-                  value={m.description}
-                  onChange={(e) => updateMilestone(i, "description", e.target.value)}
-                  placeholder={`Milestone ${i + 1} spec (what the code must do)`}
-                  className="flex-1 rounded-lg border border-wasit-line p-3 text-sm"
-                />
-                <input
-                  value={m.amount}
-                  onChange={(e) => updateMilestone(i, "amount", e.target.value)}
-                  placeholder="Amount (wei)"
-                  className="w-36 rounded-lg border border-wasit-line p-3 text-sm"
-                />
-                {milestones.length > 1 && (
-                  <button
-                    onClick={() => removeMilestoneRow(i)}
-                    className="px-2 text-wasit-red"
-                    aria-label="Remove milestone"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <details className="rounded-lg border border-wasit-line p-3 text-sm">
-          <summary className="cursor-pointer font-semibold text-wasit-ink">Advanced</summary>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="mb-1 block text-xs text-wasit-muted">
-                Protocol fee treasury address (receives the fee_bps cut — NOT the arbiter)
-              </label>
-              <input value={treasuryAddress} onChange={(e) => setTreasuryAddress(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm font-mono" placeholder="0x..." />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-wasit-muted">Protocol fee (bps, max 1000)</label>
-              <input value={feeBps} onChange={(e) => setFeeBps(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-wasit-muted">Max revisions (max 5)</label>
-              <input value={maxRevisions} onChange={(e) => setMaxRevisions(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-wasit-muted">Max claim attempts</label>
-              <input value={maxClaimAttempts} onChange={(e) => setMaxClaimAttempts(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-wasit-muted">Abandonment timeout (days)</label>
-              <input value={abandonmentDays} onChange={(e) => setAbandonmentDays(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm" />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-wasit-muted">Appeal window (days)</label>
-              <input value={appealWindowDays} onChange={(e) => setAppealWindowDays(e.target.value)} className="w-full rounded-lg border border-wasit-line p-2 text-sm" />
-            </div>
-          </div>
-        </details>
-
-        {error && <p className="text-sm text-wasit-red">{error}</p>}
-
-        <button
-          onClick={handleSubmit}
-          disabled={step !== "form" || !projectTitle || !arbiterAddress || !treasuryAddress}
-          className="w-full rounded-full bg-wasit-ink py-3 text-sm font-bold text-wasit-bg disabled:opacity-40"
-        >
-          {step === "form" && "Deploy escrow"}
-          {step === "deploying" && "Deploying…"}
-          {step === "locking" && "Locking milestones…"}
-          {step === "done" && "Done — redirecting…"}
-        </button>
-
-        {newEscrowAddress && (
-          <p className="text-xs text-wasit-muted">
-            Deployed at <span className="font-mono">{newEscrowAddress}</span>
+        {!address && (
+          <p className="mt-f3 rounded border border-dashed border-line p-f3 text-sm text-muted">
+            Connect a wallet to continue.
           </p>
         )}
-      </div>
-    </main>
+
+        <div className="mt-f4 grid gap-f3">
+          <div>
+            <label className="field-label" htmlFor="title">
+              Project title
+              <span className="field-hint"> — at least 10 characters</span>
+            </label>
+            <input
+              id="title"
+              className="input"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Rate limiter for the API gateway"
+            />
+          </div>
+
+          <div>
+            <label className="field-label" htmlFor="desc">
+              What the project is
+              <span className="field-hint">
+                {" "}
+                — at least 40 characters; validators read this as context
+              </span>
+            </label>
+            <textarea
+              id="desc"
+              className="input"
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Context a reviewer needs about the whole project, beyond any single milestone's spec."
+            />
+          </div>
+
+          <div>
+            <label className="field-label" htmlFor="arbiter">
+              Arbiter
+              <span className="field-hint"> — only bonded arbiters can be chosen</span>
+            </label>
+            {arbiters.length > 0 ? (
+              <select
+                id="arbiter"
+                className="input font-mono text-xs"
+                value={arbiter}
+                onChange={(e) => setArbiter(e.target.value)}
+              >
+                <option value="">Choose an arbiter…</option>
+                {arbiters.map((a) => (
+                  <option key={a.address} value={a.address}>
+                    {a.address.slice(0, 10)}…{a.address.slice(-4)} · {a.rulings.toString()}{" "}
+                    rulings{a.senior ? " · senior" : ""}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="arbiter"
+                className="input font-mono text-xs"
+                value={arbiter}
+                onChange={(e) => setArbiter(e.target.value)}
+                placeholder="0x… — no bonded arbiters found, paste an address"
+              />
+            )}
+          </div>
+
+          <div>
+            <div className="mb-f1 flex items-center justify-between">
+              <span className="field-label mb-0">Milestones</span>
+              <button
+                className="text-sm font-bold text-turf underline underline-offset-2"
+                onClick={() => setRows((p) => [...p, { description: "", amount: "" }])}
+              >
+                Add another
+              </button>
+            </div>
+
+            <div className="grid gap-f2">
+              {rows.map((row, i) => (
+                <div key={i} className="flex gap-f1">
+                  <input
+                    className="input flex-1"
+                    value={row.description}
+                    onChange={(e) => setRow(i, "description", e.target.value)}
+                    placeholder={`Milestone ${i + 1} — what the code must do`}
+                  />
+                  <input
+                    className="input w-[130px]"
+                    value={row.amount}
+                    onChange={(e) =>
+                      // Normalize comma to dot on input so users with
+                      // locale keyboards (e.g. Indonesian) don't hit a
+                      // parse error when they type "1,5" instead of "1.5".
+                      setRow(i, "amount", e.target.value.replace(/,/g, "."))
+                    }
+                    placeholder="e.g. 1.5 GEN"
+                    inputMode="decimal"
+                  />
+                  {rows.length > 1 && (
+                    <button
+                      className="px-f1 text-muted hover:text-sending"
+                      onClick={() => setRows((p) => p.filter((_, n) => n !== i))}
+                      aria-label={`Remove milestone ${i + 1}`}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {totalPreview && (
+              <p className="mt-f2 text-sm text-muted">
+                Total to fund: <span className="font-mono">{totalPreview} GEN</span>
+              </p>
+            )}
+          </div>
+
+          <details className="rounded border border-line p-f2">
+            <summary className="cursor-pointer text-sm font-bold">Advanced</summary>
+            <div className="mt-f3 grid gap-f2 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="field-label" htmlFor="treasury">
+                  Protocol fee goes to
+                  <span className="field-hint"> — not the arbiter</span>
+                </label>
+                <input
+                  id="treasury"
+                  className="input font-mono text-xs"
+                  value={treasury}
+                  onChange={(e) => setTreasury(e.target.value)}
+                  placeholder="0x…"
+                />
+              </div>
+              {[
+                ["Protocol fee (bps, max 1000)", feeBps, setFeeBps],
+                ["Revisions allowed (max 5)", maxRevisions, setMaxRevisions],
+                ["Claim attempts (min 3)", maxClaimAttempts, setMaxClaimAttempts],
+                ["Abandonment timeout (days)", abandonmentDays, setAbandonmentDays],
+                ["Appeal window (days)", appealDays, setAppealDays],
+              ].map(([label, value, set]: any) => (
+                <div key={label}>
+                  <label className="field-label">{label}</label>
+                  <input
+                    className="input"
+                    value={value}
+                    onChange={(e) => set(e.target.value)}
+                    inputMode="numeric"
+                  />
+                </div>
+              ))}
+            </div>
+          </details>
+
+          {error && <p className="text-sm text-sending">{error}</p>}
+
+          <button className="btn w-full" disabled={!ready || busy} onClick={handleCreate}>
+            {busyLabel}
+          </button>
+
+          {busy && (
+            <p className="text-center text-sm text-muted">
+              This takes several transactions. Approve each one in your wallet and keep
+              this tab open.
+            </p>
+          )}
+        </div>
+      </main>
+    </>
   );
 }

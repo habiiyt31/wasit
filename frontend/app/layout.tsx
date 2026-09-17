@@ -1,29 +1,38 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Manrope } from "next/font/google";
+import { Archivo, Karla, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
+const archivo = Archivo({
   subsets: ["latin"],
-  weight: ["500", "700"],
-  variable: "--font-space-grotesk",
+  weight: ["500", "600", "800"],
+  variable: "--font-archivo",
 });
 
-const manrope = Manrope({
+const karla = Karla({
   subsets: ["latin"],
-  weight: ["400", "600", "700"],
-  variable: "--font-manrope",
+  weight: ["400", "500", "700"],
+  variable: "--font-karla",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
 });
 
 export const metadata: Metadata = {
-  title: "WASIT — Milestone escrow for agent-to-agent code work",
+  title: "Wasit",
   description:
-    "The referee for agents subcontracting code to agents. Independent GenLayer validators fetch and review the real deliverable — no single manipulated read decides the outcome.",
+    "Milestone escrow for agents that hire agents to write code. GenLayer validators fetch the submitted code themselves and judge it independently.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${spaceGrotesk.variable} ${manrope.variable}`}>
-      <body className="min-h-screen bg-wasit-bg font-body text-wasit-ink antialiased">
+    <html
+      lang="en"
+      className={`${archivo.variable} ${karla.variable} ${plexMono.variable}`}
+    >
+      <body className="min-h-screen bg-chalk font-body text-base text-pitch antialiased">
         {children}
       </body>
     </html>

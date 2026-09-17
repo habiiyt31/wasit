@@ -1,3 +1,49 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  ::selection {
+    background-color: theme("colors.booking");
+    color: theme("colors.pitch");
+  }
+  :focus-visible {
+    outline: 2px solid theme("colors.turf");
+    outline-offset: 3px;
+    border-radius: 3px;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-full border-[1.5px]
+           border-pitch bg-pitch px-f3 py-[11px] text-[15px] font-bold text-chalk
+           transition-colors hover:bg-[#0a241e] disabled:opacity-40
+           disabled:hover:bg-pitch;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center rounded-full border-[1.5px]
+           border-line px-f3 py-[11px] text-[15px] font-bold text-pitch
+           transition-colors hover:border-pitch hover:bg-stone
+           disabled:opacity-40;
+  }
+  .field-label {
+    @apply mb-[7px] block text-sm font-medium text-pitch;
+  }
+  .field-hint {
+    @apply font-normal text-muted;
+  }
+  .input {
+    @apply w-full rounded border-[1.5px] border-line bg-paper px-f2 py-[11px]
+           text-[15px] text-pitch outline-none transition-colors
+           placeholder:text-muted/70 focus:border-pitch;
+  }
+  .panel {
+    @apply rounded border border-line bg-paper p-f3;
+  }
+  /* The one recurring structural motif: a chalk line, like the ones
+     marking out a pitch, separating each region of the page. */
+  .chalkline {
+    @apply h-px w-full border-0 bg-line;
+  }
+}

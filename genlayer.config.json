@@ -1,5 +1,11 @@
 {
   "networks": {
+    "studioNext": {
+      "rpcUrl": "https://studio-next.genlayer.com/api",
+      "chainId": 61997,
+      "currency": "GEN",
+      "explorer": "https://explorer-studio-dev.genlayer.com"
+    },
     "studionet": {
       "rpcUrl": "https://studio.genlayer.com/api",
       "chainId": 61999,
@@ -31,5 +37,5 @@
       "faucet": "https://testnet-faucet.genlayer.foundation"
     }
   },
-  "defaultNetwork": "studionet"
+  "defaultNetwork": "studioNext"
 }

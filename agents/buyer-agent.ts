@@ -1,95 +1,85 @@
 /**
- * BUYER AGENT — run this as its own process, independent from
- * seller-agent.ts. It never touches seller-agent.ts's private key or
- * process memory; the only thing connecting them is on-chain state
- * (the escrow contract) and the escrow address printed at the end,
- * which you hand to the seller agent the same way a real buyer would
- * hand a seller a contract address — it's public information, not a
- * secret.
+ * Buyer agent — the agent that subcontracts a coding task.
  *
- * Run: WASIT_FACTORY_ADDRESS=0x... BUYER_AGENT_PRIVATE_KEY=0x... \
- *      SELLER_AGENT_ADDRESS=0x... ARBITER_ADDRESS=0x... \
- *      npx tsx buyer-agent.ts
+ * Creates an escrow, adds its milestones, locks them, and funds it. In
+ * the single-contract rebuild this is four ordinary writes against one
+ * address; it used to require deploying a per-deal contract and
+ * registering it with a factory.
+ *
+ * Run:
+ *   WASIT_ADDRESS=0x… BUYER_AGENT_PRIVATE_KEY=0x… \
+ *   ARBITER_ADDRESS=0x… SELLER_ADDRESS=0x… npx tsx buyer-agent.ts
  */
+import { parseEther } from "viem";
+import { makeAgentClient, writeAndWait, WASIT_ADDRESS } from "./shared";
 
-import { makeAgentClient, writeAndWait, FACTORY_ADDRESS } from "./shared";
+const ARBITER_ADDRESS = process.env.ARBITER_ADDRESS;
+const SELLER_ADDRESS = process.env.SELLER_ADDRESS;
 
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
-const MILESTONE_AMOUNT = 300000000000000000n; // 0.3 GEN
+const PROJECT_TITLE = "Rate limiter for the API gateway";
+const PROJECT_DESCRIPTION =
+  "A Node service fronting our internal APIs. It needs per-key rate limiting " +
+  "so one noisy client cannot exhaust capacity for everyone else.";
+
+const MILESTONES = [
+  {
+    description: "Token bucket middleware, 100 requests per minute per API key",
+    amount: parseEther("0.5"),
+  },
+  {
+    description: "Return 429 with a Retry-After header, covered by tests",
+    amount: parseEther("0.3"),
+  },
+];
 
 async function main() {
-  const { client, address } = makeAgentClient("BUYER_AGENT_PRIVATE_KEY");
-  console.log(`[buyer-agent] address: ${address}`);
-
-  const sellerAddress = process.env.SELLER_AGENT_ADDRESS as `0x${string}` | undefined;
-  const arbiterAddress = process.env.ARBITER_ADDRESS as `0x${string}` | undefined;
-  const treasuryAddress = (process.env.TREASURY_ADDRESS as `0x${string}` | undefined) ?? address;
-
-  if (!sellerAddress || !arbiterAddress) {
-    throw new Error(
-      "Set SELLER_AGENT_ADDRESS and ARBITER_ADDRESS in your environment (see README.md)."
-    );
+  if (!ARBITER_ADDRESS || !SELLER_ADDRESS) {
+    throw new Error("Set ARBITER_ADDRESS and SELLER_ADDRESS before running this agent.");
   }
 
-  console.log("[buyer-agent] creating escrow...");
-  const { receipt } = await writeAndWait(client, {
-    address: FACTORY_ADDRESS!,
-    functionName: "create_escrow",
-    args: [
-      "Rate limiter middleware",
-      "Implement a token bucket rate limiter for the public API gateway, handling burst traffic gracefully.",
-      arbiterAddress,
-      ZERO_ADDRESS,
-      250n, // fee_bps: 2.5%
-      treasuryAddress,
-      3n, // max_revisions
-      3n, // max_claim_attempts
-      14, // abandonment_timeout_days
-      3, // appeal_window_days
-    ],
-    value: 0n,
-  });
+  const client = makeAgentClient("BUYER_AGENT_PRIVATE_KEY");
+  const buyer = client.account.address;
+  console.log(`Buyer agent ${buyer} against Wasit at ${WASIT_ADDRESS}`);
 
-  // See README's "still unconfirmed" section — which receipt field
-  // carries the freshly deployed address hasn't been checked against
-  // a real Studio deploy yet.
-  const escrowAddress =
-    (receipt as any).to_address || (receipt as any).recipient || (receipt as any).data?.contract_address;
+  await writeAndWait(client, "create_escrow", [
+    PROJECT_TITLE,
+    PROJECT_DESCRIPTION,
+    ARBITER_ADDRESS,
+    250n, // 2.5% protocol fee
+    buyer, // fee recipient
+    2n, // revisions allowed
+    3n, // claim attempts before a force release
+    30n, // abandonment timeout, days
+    3n, // appeal window, days
+  ]);
 
-  if (!escrowAddress) {
-    console.log("[buyer-agent] full receipt for manual inspection:", JSON.stringify(receipt, null, 2));
-    throw new Error("Could not find the deployed escrow address in the receipt — fix this file once you know the right field.");
-  }
-  console.log(`[buyer-agent] escrow deployed at: ${escrowAddress}`);
-
-  console.log("[buyer-agent] adding milestone...");
-  await writeAndWait(client, {
-    address: escrowAddress,
-    functionName: "add_milestone",
-    args: ["Endpoint returns HTTP 429 once the rate limit is exceeded", MILESTONE_AMOUNT],
-    value: 0n,
-  });
-
-  console.log("[buyer-agent] locking milestones...");
-  await writeAndWait(client, {
-    address: escrowAddress,
-    functionName: "lock_milestones",
+  // The contract returns the new id, but reading a return value back off
+  // a tracked transaction is version-dependent. The count is
+  // authoritative, and this escrow is always the most recent one.
+  const count: bigint = await client.readContract({
+    address: WASIT_ADDRESS,
+    functionName: "get_escrow_count",
     args: [],
-    value: 0n,
   });
+  const escrowId = count - 1n;
+  console.log(`Created escrow #${escrowId}`);
 
-  console.log("[buyer-agent] funding escrow...");
-  await writeAndWait(client, {
-    address: escrowAddress,
-    functionName: "fund",
-    args: [sellerAddress],
-    value: MILESTONE_AMOUNT,
-  });
+  let total = 0n;
+  for (const m of MILESTONES) {
+    await writeAndWait(client, "add_milestone", [escrowId, m.description, m.amount]);
+    total += m.amount;
+    console.log(`Added milestone: ${m.description}`);
+  }
 
-  console.log(`\n[buyer-agent] done. Hand this address to the seller agent:\n${escrowAddress}`);
+  await writeAndWait(client, "lock_milestones", [escrowId]);
+  console.log("Milestones locked");
+
+  await writeAndWait(client, "fund", [escrowId, SELLER_ADDRESS], total);
+  console.log(`Funded with ${total} wei. Seller ${SELLER_ADDRESS} can start.`);
+  console.log(`\nRun the seller agent with:  ESCROW_ID=${escrowId}`);
 }
 
 main().catch((err) => {
-  console.error("[buyer-agent] failed:", err);
+  console.error(err);
   process.exit(1);
 });

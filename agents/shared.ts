@@ -1,67 +1,78 @@
 import { createAccount, createClient } from "genlayer-js";
-import { studionet } from "genlayer-js/chains";
+import { studioDevnet } from "genlayer-js/chains";
 import { TransactionStatus } from "genlayer-js/types";
+import { defineChain } from "viem";
 
 /**
- * This is the part that actually answers "can an AI agent use WASIT
- * without a human clicking a button" — createAccount(privateKey)
- * returns a real local signer (confirmed against genlayer-js@1.1.8's
- * own type declarations: it's a viem-style Account object with its
- * own .sign()/.signMessage()), and createClient({ account }) accepts
- * that Account directly. No window.ethereum, no MetaMask, no browser
- * anywhere in this file. Compare this to frontend/lib/genlayer.ts,
- * which deliberately takes the OPPOSITE path (account as a plain
- * address string + an injected provider) because that file is for a
- * human at a browser. Two different account shapes for two different
- * kinds of caller — genlayer-js supports both natively.
+ * Studio Next — the Consensus v0.6 network the hackathon runs on. Built
+ * on top of genlayer-js's own studioDevnet so the chain ID and consensus
+ * contract addresses stay together; only the RPC and explorer differ.
  */
+const studioNext = defineChain({
+  ...studioDevnet,
+  name: "GenLayer Studio Next",
+  rpcUrls: { default: { http: ["https://studio-next.genlayer.com/api"] } },
+  blockExplorers: {
+    default: {
+      name: "GenLayer Explorer",
+      url: "https://explorer-studio-dev.genlayer.com/",
+    },
+  },
+});
 
-export const chain = studionet;
+/**
+ * One address for everything. Arbiters and every escrow live inside the
+ * single Wasit contract, so an agent needs no per-deal address.
+ */
+export const WASIT_ADDRESS = process.env.WASIT_ADDRESS as `0x${string}` | undefined;
 
-export const FACTORY_ADDRESS = process.env.WASIT_FACTORY_ADDRESS as
-  | `0x${string}`
-  | undefined;
-
-if (!FACTORY_ADDRESS) {
+if (!WASIT_ADDRESS) {
   throw new Error(
-    "Set WASIT_FACTORY_ADDRESS in your environment before running an agent (see README.md)."
+    "Set WASIT_ADDRESS in your environment before running an agent (see agents/README.md)."
   );
 }
 
-/**
- * Builds a client that signs with a private key held directly by the
- * calling process — this is the agent itself, not a human relaying
- * through a wallet extension.
- */
 export function makeAgentClient(privateKeyEnvVar: string) {
-  const privateKey = process.env[privateKeyEnvVar] as `0x${string}` | undefined;
-  if (!privateKey) {
-    throw new Error(
-      `Set ${privateKeyEnvVar} in your environment — a Studionet-funded private key for this agent.`
-    );
+  const key = process.env[privateKeyEnvVar];
+  if (!key) {
+    throw new Error(`Set ${privateKeyEnvVar} in your environment before running this agent.`);
   }
-  const account = createAccount(privateKey);
-  const client = createClient({ chain, account });
-  return { client, address: account.address as `0x${string}` };
+  return createClient({
+    chain: studioNext,
+    account: createAccount(key as `0x${string}`),
+  });
 }
 
 /**
- * Same ACCEPTED-not-FINALIZED reasoning as frontend/lib/wasitFactory.ts
- * and wasitEscrow.ts — see that file's comment for why.
+ * ACCEPTED, not FINALIZED: acceptance is the point where validator
+ * consensus has already been reached and the state is real. Waiting for
+ * finalization adds confirmation depth on top of that and makes writes
+ * look hung.
+ *
+ * NOTE ON FEES: Studio Next charges a fee on every write. The browser
+ * app quotes that fee through @genlayer/transaction-kit
+ * (frontend/lib/txkit.ts). These Node agents call genlayer-js directly
+ * instead, which has not been verified end-to-end against the fee
+ * policy — if a write here fails on fees, port this helper to
+ * Transaction Kit the way the frontend does.
  */
 export async function writeAndWait(
-  client: ReturnType<typeof makeAgentClient>["client"],
-  params: { address: `0x${string}`; functionName: string; args: unknown[]; value: bigint },
-  opts?: { interval?: number; retries?: number }
+  client: any,
+  functionName: string,
+  args: unknown[],
+  value: bigint = 0n
 ) {
-  const hash = await client.writeContract(params as any);
-  console.log(`  -> tx submitted: ${hash}`);
-  const receipt = await client.waitForTransactionReceipt({
+  const hash = await client.writeContract({
+    address: WASIT_ADDRESS,
+    functionName,
+    args,
+    value,
+  });
+  await client.waitForTransactionReceipt({
     hash,
     status: TransactionStatus.ACCEPTED,
-    interval: opts?.interval ?? 3000,
-    retries: opts?.retries ?? 60,
+    retries: 60,
+    interval: 3000,
   });
-  console.log(`  -> tx accepted`);
-  return { hash, receipt };
+  return hash;
 }
