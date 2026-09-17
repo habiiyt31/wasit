@@ -116,8 +116,17 @@ export function normalizeAddress(address: string): `0x${string}` {
   return trimmed.toLowerCase() as `0x${string}`;
 }
 
-/** Write client bound to the connected wallet address. */
-function getWriteClient(walletAddress: string) {
+/**
+ * Write client bound to the connected wallet address. Exported (not just
+ * used internally by ensureCorrectNetwork below) because lib/txkit.ts
+ * also needs it directly: Transaction Kit's own estimate()/submit() pair
+ * never declares a fee allocation for a contract call that ends up
+ * sending GEN out as an "external" GenVM message (contracts/wasit.py's
+ * `_pay`/`_release`) -- see the PAYABLE_METHODS comment in lib/txkit.ts.
+ * For those specific methods, txkit.ts bypasses the kit and calls this
+ * client's estimateTransactionFeesForWrite()/writeContract() directly.
+ */
+export function getWriteClient(walletAddress: string) {
   return createClient({
     chain: resolveChain(),
     account: normalizeAddress(walletAddress),
